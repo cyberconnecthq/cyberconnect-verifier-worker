@@ -48,9 +48,11 @@ export async function handleVerify(request) {
         const userIdRes = await gatherResponse(twitterRes)
         // 就是这步拿不到这个user发的推
         console.log(userIdRes)
-        const userId = userIdRes.data?.id
+        const userId = userIdRes.data.id
         const timelineUrl = `https://api.twitter.com/2/users/${userId}/tweets?tweet.fields=text`
         const timeline = await fetch(timelineUrl, requestOptions)
+        const timelineRes = await gatherResponse(timeline)
+        console.log(timelineRes)
         // if no tweet or author found, return error
         if (!twitterResponse.data || !twitterResponse.includes) {
             return new Response(null, {
