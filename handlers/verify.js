@@ -5,10 +5,11 @@ import { Octokit } from '@octokit/rest'
 
 // github api info
 const USER_AGENT = 'Cloudflare Worker'
-
+const TWITTER_TOKEN =
+    'AAAAAAAAAAAAAAAAAAAAAMXjWgEAAAAAUKlifPiazU7pVgE106lau%2FhVIuM%3Dv3lGmZrkfrhBC3ujgFRfX5420yP4IIhuHu7BJmWcJdd9UKmDLd'
 // format request for twitter api
 var requestHeaders = new Headers()
-requestHeaders.append('Authorization', 'Bearer ' + TWITTER_BEARER)
+requestHeaders.append('Authorization', 'Bearer ' + TWITTER_TOKEN)
 var requestOptions = {
     method: 'GET',
     headers: requestHeaders,
@@ -35,17 +36,21 @@ export async function handleVerify(request) {
     try {
         // get tweet id and account from url
         const { searchParams } = new URL(request.url)
-        let tweetID = searchParams.get('id')
-        let account = searchParams.get('account')
-
+        // let tweetID = searchParams.get('id')
+        let username = searchParams.get('username')
+        // console.log(request)
         // get tweet data from twitter api
-        const twitterURL = `https://api.twitter.com/2/tweets?ids=${tweetID}&expansions=author_id&user.fields=username`
+        // const twitterURL = `https://api.twitter.com/2/tweets?ids=${tweetID}&expansions=author_id&user.fields=username`
+        const twitterURL = `https://api.twitter.com/2/users/by/username/${username}?tweet.fields=attachments,author_id,conversation_id,created_at,entities,geo,id,in_reply_to_user_id,lang,possibly_sensitive,referenced_tweets,source,text,withheld`
         requestOptions.headers.set('Origin', new URL(twitterURL).origin) // format for cors
         const twitterRes = await fetch(twitterURL, requestOptions)
-
         // parse the response from Twitter
-        const twitterResponse = await gatherResponse(twitterRes)
-
+        const userIdRes = await gatherResponse(twitterRes)
+        // 就是这步拿不到这个user发的推
+        console.log(userIdRes)
+        const userId = userIdRes.data?.id
+        const timelineUrl = `https://api.twitter.com/2/users/${userId}/tweets?tweet.fields=text`
+        const timeline = await fetch(timelineUrl, requestOptions)
         // if no tweet or author found, return error
         if (!twitterResponse.data || !twitterResponse.includes) {
             return new Response(null, {
@@ -55,7 +60,7 @@ export async function handleVerify(request) {
         }
 
         // get tweet text and handle
-        const tweetContent = twitterResponse.data[0].text
+        const tweetContent = timeline.data[0].text
         const handle = twitterResponse.includes.users[0].username
 
         // parse sig from tweet

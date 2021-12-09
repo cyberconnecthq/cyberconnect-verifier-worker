@@ -47,7 +47,7 @@ async function handleRequest(request) {
     return resp
 }
 
-const PROXY_ENDPOINT = '/api'
+const PROXY_ENDPOINT = '/verify'
 
 addEventListener('fetch', event => {
     const request = event.request
