@@ -7,6 +7,8 @@ const corsHeaders = {
     'Access-Control-Max-Age': '86400',
 }
 
+const PROXY_ENDPOINT = '/api'
+
 function handleOptions(request) {
     let headers = request.headers
     if (
@@ -34,7 +36,7 @@ function handleOptions(request) {
 
 async function handleRequest(request) {
     const r = new Router()
-    r.get('.*/verify', request => handleVerify(request))
+    r.get(`.*/twitter-verify`, request => handleVerify(request))
     r.get(
         '/',
         () =>
@@ -46,8 +48,6 @@ async function handleRequest(request) {
     const resp = await r.route(request)
     return resp
 }
-
-const PROXY_ENDPOINT = '/verify'
 
 addEventListener('fetch', event => {
     const request = event.request

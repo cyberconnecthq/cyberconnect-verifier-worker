@@ -1,121 +1,115 @@
-import { recoverPersonalSignature } from 'eth-sig-util'
-import { ethers } from 'ethers'
+import { recoverTypedSignature_v4 as recoverTypedSignatureV4 } from 'eth-sig-util'
 import { gatherResponse } from '../utils'
+import { toChecksumAddress } from 'ethereumjs-util'
 import { Octokit } from '@octokit/rest'
 
 // github api info
 const USER_AGENT = 'Cloudflare Worker'
-const TWITTER_TOKEN =
-    'AAAAAAAAAAAAAAAAAAAAAMXjWgEAAAAAUKlifPiazU7pVgE106lau%2FhVIuM%3Dv3lGmZrkfrhBC3ujgFRfX5420yP4IIhuHu7BJmWcJdd9UKmDLd'
+
 // format request for twitter api
 var requestHeaders = new Headers()
-requestHeaders.append('Authorization', 'Bearer ' + TWITTER_TOKEN)
+requestHeaders.append('Authorization', 'Bearer ' + TWITTER_BEARER)
 var requestOptions = {
     method: 'GET',
     headers: requestHeaders,
     redirect: 'follow',
 }
 const init = {
-    headers: { 'content-type': 'application/json' },
+    headers: {
+        'content-type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        Vary: 'Origin',
+    },
 }
 
 // regex for parsing tweet
-const reg = new RegExp('(?<=sig:).*')
+const sigReg = new RegExp('(?<=sig:).*')
 
 /**
  * @param {*} request
- * Accpets id=<tweet id>
- * Accepts account=<eth address> // just used to aler client of incorrect signer found
+ * Accpets handle=<tweet handle>
+ * Accepts addr=<eth address> // just used to aler client of incorrect signer found
  *
- * 1. fetch tweet data using tweet id
+ * 1. fetch tweet data using handle
  * 2. construct signature data using handle from tweet
  * 3. recover signer of signature from tweet
  * 4. if signer is the expected address, update gist with address -> handle mapping
  */
 export async function handleVerify(request) {
     try {
-        // get tweet id and account from url
+        // get tweet handle and addr from url
         const { searchParams } = new URL(request.url)
-        // let tweetID = searchParams.get('id')
-        let username = searchParams.get('username')
-        // console.log(request)
+
+        const handle = searchParams.get('handle')
+        const addr = searchParams.get('addr')
+
         // get tweet data from twitter api
-        // const twitterURL = `https://api.twitter.com/2/tweets?ids=${tweetID}&expansions=author_id&user.fields=username`
-        const twitterURL = `https://api.twitter.com/2/users/by/username/${username}?tweet.fields=attachments,author_id,conversation_id,created_at,entities,geo,id,in_reply_to_user_id,lang,possibly_sensitive,referenced_tweets,source,text,withheld`
+        const twitterURL = `https://api.twitter.com/2/tweets/search/recent?query=from:${handle}`
         requestOptions.headers.set('Origin', new URL(twitterURL).origin) // format for cors
         const twitterRes = await fetch(twitterURL, requestOptions)
         // parse the response from Twitter
-        const userIdRes = await gatherResponse(twitterRes)
-        // 就是这步拿不到这个user发的推
-        console.log(userIdRes)
-        const userId = userIdRes.data.id
-        const timelineUrl = `https://api.twitter.com/2/users/${userId}/tweets?tweet.fields=text`
-        const timeline = await fetch(timelineUrl, requestOptions)
-        const timelineRes = await gatherResponse(timeline)
-        console.log(timelineRes)
+        const twitterResponse = await gatherResponse(twitterRes)
+
         // if no tweet or author found, return error
-        if (!twitterResponse.data || !twitterResponse.includes) {
-            return new Response(null, {
+        if (!twitterResponse.data) {
+            return new Response('invalid handle', {
+                ...init,
                 status: 400,
-                statusText: 'Invalid tweet id',
+                statusText: 'Invalid handle',
             })
         }
 
         // get tweet text and handle
-        const tweetContent = timeline.data[0].text
-        const handle = twitterResponse.includes.users[0].username
+        const tweets = twitterResponse.data
 
-        // parse sig from tweet
-        const matchedText = tweetContent.match(reg)
+        // // parse sig from tweet
+        const matched = tweets.find(tweet => {
+            return !!tweet.text.match(sigReg)
+        })
 
-        // if no proper signature or handle data found, return error
-        if (
-            !twitterResponse.data ||
-            !twitterResponse.includes ||
-            !matchedText
-        ) {
+        if (!matched) {
             return new Response(null, {
+                ...init,
                 status: 400,
-                statusText: 'Invalid tweet format',
+                statusText: 'Can not find the tweet',
             })
         }
 
-        // construct data for EIP712 signature recovery
-        const data = {
+        const tweetID = matched.id
+        const matchedText = matched.text
+
+        // parse sig from tweet
+        const sig = matchedText.match(sigReg)[0].slice(0, 132)
+
+        const msgParams = {
+            domain: {
+                name: 'CyberConnect Verifier',
+                version: '1',
+            },
+            message: {
+                contents: "I'm verifying my Twitter account on CyberConnect",
+            },
+            primaryType: 'Permit',
             types: {
                 EIP712Domain: [
                     { name: 'name', type: 'string' },
                     { name: 'version', type: 'string' },
                 ],
-                Permit: [{ name: 'username', type: 'string' }],
-            },
-            domain: {
-                name: 'Sybil Verifier',
-                version: '1',
-            },
-            primaryType: 'Permit',
-            message: {
-                username: handle,
+                Permit: [{ name: 'contents', type: 'string' }],
             },
         }
 
-        // parse sig from tweet
-        const sig = matchedText[0].slice(0, 132)
-
-        // recover signer
-        const signer = recoverPersonalSignature({
-            data: JSON.stringify(data),
+        const recoveredAddr = recoverTypedSignatureV4({
+            data: msgParams,
             sig,
         })
 
-        // format with chekcsummed address
-        const formattedSigner = ethers.utils.getAddress(signer)
-
         // if signer found is not the expected signer, alert client and dont update gist
-        if (account !== formattedSigner) {
-            return new Response(null, init, {
+        if (toChecksumAddress(recoveredAddr) !== toChecksumAddress(addr)) {
+            return new Response(null, {
+                ...init,
                 status: 400,
-                statusText: 'Invalid account',
+                statusText: "Address doesn't match",
             })
         }
 
@@ -123,7 +117,7 @@ export async function handleVerify(request) {
         let response
 
         const fileName = 'verified.json'
-        const githubPath = '/repos/Uniswap/sybil-list/contents/'
+        const githubPath = '/repos/cyberconnecthq/connect-list/contents/'
 
         const fileInfo = await fetch(
             'https://api.github.com' + githubPath + fileName,
@@ -134,12 +128,14 @@ export async function handleVerify(request) {
                 },
             }
         )
+
         const fileJSON = await fileInfo.json()
         const sha = fileJSON.sha
 
         // Decode the String as json object
         var decodedSybilList = JSON.parse(atob(fileJSON.content))
-        decodedSybilList[formattedSigner] = {
+
+        decodedSybilList[recoveredAddr] = {
             twitter: {
                 timestamp: Date.now(),
                 tweetID,
@@ -157,10 +153,10 @@ export async function handleVerify(request) {
         const updateResponse = await octokit.request(
             'PUT ' + githubPath + fileName,
             {
-                owner: 'uniswap',
-                repo: 'sybil-list',
+                owner: 'cyberconnect',
+                repo: 'connect-list',
                 path: fileName,
-                message: 'Linking ' + formattedSigner + ' to handle: ' + handle,
+                message: 'Linking ' + recoveredAddr + ' to handle: ' + handle,
                 sha,
                 content: encodedData,
             }
@@ -168,22 +164,23 @@ export async function handleVerify(request) {
 
         if (updateResponse.status === 200) {
             // respond with handle if succesul update
-            response = new Response(handle, init, {
+            response = new Response(handle, {
+                ...init,
                 status: 200,
                 statusText: 'Succesful verification',
             })
         } else {
-            response = new Response(null, init, {
+            response = new Response(null, {
+                ...init,
                 status: 400,
                 statusText: 'Error updating list.',
             })
         }
 
-        response.headers.set('Access-Control-Allow-Origin', '*')
-        response.headers.append('Vary', 'Origin')
         return response
     } catch (e) {
-        response = new Response(null, init, {
+        return new Response(null, {
+            ...init,
             status: 400,
             statusText: 'Error:' + e,
         })
