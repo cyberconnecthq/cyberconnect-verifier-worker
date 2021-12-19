@@ -116,26 +116,38 @@ export async function handleVerify(request) {
         // initialize response
         let response
 
+        const octokit = new Octokit({
+            auth: GITHUB_AUTHENTICATION,
+        })
+
         const fileName = 'verified.json'
         const githubPath = '/repos/cyberconnecthq/connect-list/contents/'
 
+        const repoInfo = await fetch('https://api.github.com' + githubPath, {
+            headers: {
+                Authorization: 'token ' + GITHUB_AUTHENTICATION,
+                'User-Agent': USER_AGENT,
+            },
+        })
+
+        const repoJSON = await repoInfo.json()
+
+        const verifyFile = repoJSON.find(file => {
+            return file.name === fileName
+        })
+
+        const sha = verifyFile.sha
+
         const fileInfo = await fetch(
-            'https://api.github.com' + githubPath + fileName,
-            {
-                headers: {
-                    Authorization: 'token ' + GITHUB_AUTHENTICATION,
-                    'User-Agent': USER_AGENT,
-                },
-            }
+            'https://raw.githubusercontent.com/cyberconnecthq/connect-list/main/verified.json'
         )
 
         const fileJSON = await fileInfo.json()
-        const sha = fileJSON.sha
 
         // Decode the String as json object
-        var decodedSybilList = JSON.parse(atob(fileJSON.content))
+        var decodedList = fileJSON
 
-        decodedSybilList[recoveredAddr] = {
+        decodedList[recoveredAddr] = {
             twitter: {
                 timestamp: Date.now(),
                 tweetID,
@@ -143,12 +155,9 @@ export async function handleVerify(request) {
             },
         }
 
-        const stringData = JSON.stringify(decodedSybilList)
-        const encodedData = btoa(stringData)
+        const stringData = JSON.stringify(decodedList)
 
-        const octokit = new Octokit({
-            auth: GITHUB_AUTHENTICATION,
-        })
+        const encodedData = btoa(stringData)
 
         const updateResponse = await octokit.request(
             'PUT ' + githubPath + fileName,
