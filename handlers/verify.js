@@ -127,6 +127,7 @@ export async function handleVerify(request) {
             headers: {
                 Authorization: 'token ' + GITHUB_AUTHENTICATION,
                 'User-Agent': USER_AGENT,
+                'cache-control': 'no-store',
             },
         })
 
@@ -138,14 +139,27 @@ export async function handleVerify(request) {
 
         const sha = verifyFile.sha
 
-        const fileInfo = await fetch(
-            'https://raw.githubusercontent.com/cyberconnecthq/connect-list/main/verified.json'
+        const fileInfo = await octokit.request(
+            'GET /repos/{owner}/{repo}/git/blobs/{file_sha}',
+            {
+                owner: 'cyberconnecthq',
+                repo: 'connect-list',
+                file_sha: sha,
+            }
         )
 
-        const fileJSON = await fileInfo.json()
+        const fileJSON = fileInfo.data
 
-        // Decode the String as json object
-        var decodedList = fileJSON
+        // // Decode the String as json object
+        var decodedList = JSON.parse(atob(fileJSON.content))
+
+        if (!!decodedList[recoveredAddr]) {
+            return new Response(null, {
+                ...init,
+                status: 400,
+                statusText: 'Error already verified.',
+            })
+        }
 
         decodedList[recoveredAddr] = {
             twitter: {
@@ -162,7 +176,7 @@ export async function handleVerify(request) {
         const updateResponse = await octokit.request(
             'PUT ' + githubPath + fileName,
             {
-                owner: 'cyberconnect',
+                owner: 'cyberconnecthq',
                 repo: 'connect-list',
                 path: fileName,
                 message: 'Linking ' + recoveredAddr + ' to handle: ' + handle,
