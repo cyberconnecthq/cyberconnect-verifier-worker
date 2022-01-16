@@ -57,7 +57,7 @@ const getTweetInfo = async handle => {
 
     // if no tweet or author found, return error
     if (!twitterResponse.data) {
-        throw new Error('Invalid handle')
+        throw 'Invalid handle'
     }
 
     // get tweet text and handle
@@ -69,7 +69,7 @@ const getTweetInfo = async handle => {
     })
 
     if (!matched) {
-        throw new Error('Can not find the tweet')
+        throw 'Can not find the tweet'
     }
 
     const tweetID = matched.id
@@ -122,11 +122,14 @@ const writeVerify = async ({ fileName, addr, handle, tweetID }) => {
     var decodedList = JSON.parse(atob(fileJSON.content))
 
     if (!!decodedList[addr]) {
-        return new Response(null, {
-            ...init,
-            status: 400,
-            statusText: 'Error already verified.',
-        })
+        return new Response(
+            JSON.stringify({ errorText: 'Address already verified.' }),
+            {
+                ...init,
+                status: 400,
+                statusText: 'Address already verified.',
+            }
+        )
     }
 
     decodedList[addr] = {
@@ -155,17 +158,20 @@ const writeVerify = async ({ fileName, addr, handle, tweetID }) => {
 
     if (updateResponse.status === 200) {
         // respond with handle if succesul update
-        response = new Response(handle, {
+        response = new Response(JSON.stringify({ handle }), {
             ...init,
             status: 200,
             statusText: 'Succesful verification',
         })
     } else {
-        response = new Response(null, {
-            ...init,
-            status: 400,
-            statusText: 'Error updating list.',
-        })
+        response = new Response(
+            JSON.stringify({ errorText: 'Error updating list.' }),
+            {
+                ...init,
+                status: 400,
+                statusText: 'Error updating list.',
+            }
+        )
     }
 
     return response
@@ -198,11 +204,14 @@ export async function handleVerify(request) {
 
         // if signer found is not the expected signer, alert client and dont update gist
         if (toChecksumAddress(recoveredAddr) !== toChecksumAddress(addr)) {
-            return new Response(null, {
-                ...init,
-                status: 400,
-                statusText: "Address doesn't match",
-            })
+            return new Response(
+                JSON.stringify({ errorText: 'Signature verify failed' }),
+                {
+                    ...init,
+                    status: 400,
+                    statusText: "Address doesn't match",
+                }
+            )
         }
 
         const response = await writeVerify({
@@ -214,10 +223,10 @@ export async function handleVerify(request) {
 
         return response
     } catch (e) {
-        return new Response(null, {
+        return new Response(JSON.stringify({ errorText: e }), {
             ...init,
             status: 400,
-            statusText: 'Error:' + e,
+            statusText: e,
         })
     }
 }
@@ -238,11 +247,14 @@ export async function handleVerifySolana(request) {
         if (
             !sign.detached.verify(message, bs58.decode(sig), bs58.decode(addr))
         ) {
-            return new Response(null, {
-                ...init,
-                status: 400,
-                statusText: 'Signature verify failed',
-            })
+            return new Response(
+                JSON.stringify({ errorText: 'Signature verify failed' }),
+                {
+                    ...init,
+                    status: 400,
+                    statusText: 'Signature verify failed',
+                }
+            )
         }
 
         const response = await writeVerify({
@@ -255,10 +267,10 @@ export async function handleVerifySolana(request) {
         return response
     } catch (e) {
         console.log(e)
-        return new Response(null, {
+        return new Response(JSON.stringify({ errorText: e }), {
             ...init,
             status: 400,
-            statusText: 'Error:' + e,
+            statusText: e,
         })
     }
 }
