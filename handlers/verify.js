@@ -2,6 +2,8 @@ import { recoverTypedSignature_v4 as recoverTypedSignatureV4 } from 'eth-sig-uti
 import { gatherResponse } from '../utils'
 import { toChecksumAddress } from 'ethereumjs-util'
 import { Octokit } from '@octokit/rest'
+import { sign } from 'tweetnacl'
+import bs58 from 'bs58'
 
 // github api info
 const USER_AGENT = 'Cloudflare Worker'
@@ -25,6 +27,150 @@ const init = {
 // regex for parsing tweet
 const sigReg = new RegExp('(?<=sig:).*')
 
+// sign message
+const msgParams = {
+    domain: {
+        name: 'CyberConnect Verifier',
+        version: '1',
+    },
+    message: {
+        contents: "I'm verifying my Twitter account on CyberConnect",
+    },
+    primaryType: 'Permit',
+    types: {
+        EIP712Domain: [
+            { name: 'name', type: 'string' },
+            { name: 'version', type: 'string' },
+        ],
+        Permit: [{ name: 'contents', type: 'string' }],
+    },
+}
+
+// get tweet data from twitter api
+const getTweetInfo = async handle => {
+    // get tweet data from twitter api
+    const twitterURL = `https://api.twitter.com/2/tweets/search/recent?query=from:${handle}`
+    requestOptions.headers.set('Origin', new URL(twitterURL).origin) // format for cors
+    const twitterRes = await fetch(twitterURL, requestOptions)
+    // parse the response from Twitter
+    const twitterResponse = await gatherResponse(twitterRes)
+
+    // if no tweet or author found, return error
+    if (!twitterResponse.data) {
+        throw new Error('Invalid handle')
+    }
+
+    // get tweet text and handle
+    const tweets = twitterResponse.data
+
+    // // parse sig from tweet
+    const matched = tweets.find(tweet => {
+        return !!tweet.text.match(sigReg)
+    })
+
+    if (!matched) {
+        throw new Error('Can not find the tweet')
+    }
+
+    const tweetID = matched.id
+    const matchedText = matched.text
+
+    // parse sig from tweet
+    const sig = matchedText.match(sigReg)[0].slice(0, 132)
+
+    return { tweetID, sig }
+}
+
+const writeVerify = async ({ fileName, addr, handle, tweetID }) => {
+    // initialize response
+    let response
+
+    const octokit = new Octokit({
+        auth: GITHUB_AUTHENTICATION,
+    })
+
+    const githubPath = '/repos/cyberconnecthq/connect-list/contents/'
+
+    const repoInfo = await fetch('https://api.github.com' + githubPath, {
+        headers: {
+            Authorization: 'token ' + GITHUB_AUTHENTICATION,
+            'User-Agent': USER_AGENT,
+            'cache-control': 'no-store',
+        },
+    })
+
+    const repoJSON = await repoInfo.json()
+
+    const verifyFile = repoJSON.find(file => {
+        return file.name === fileName
+    })
+
+    const sha = verifyFile.sha
+
+    const fileInfo = await octokit.request(
+        'GET /repos/{owner}/{repo}/git/blobs/{file_sha}',
+        {
+            owner: 'cyberconnecthq',
+            repo: 'connect-list',
+            file_sha: sha,
+        }
+    )
+
+    const fileJSON = fileInfo.data
+
+    // // Decode the String as json object
+    var decodedList = JSON.parse(atob(fileJSON.content))
+
+    if (!!decodedList[addr]) {
+        return new Response(null, {
+            ...init,
+            status: 400,
+            statusText: 'Error already verified.',
+        })
+    }
+
+    decodedList[addr] = {
+        twitter: {
+            timestamp: Date.now(),
+            tweetID,
+            handle,
+        },
+    }
+
+    const stringData = JSON.stringify(decodedList)
+
+    const encodedData = btoa(stringData)
+
+    const updateResponse = await octokit.request(
+        'PUT ' + githubPath + fileName,
+        {
+            owner: 'cyberconnecthq',
+            repo: 'connect-list',
+            path: fileName,
+            message: 'Linking ' + addr + ' to handle: ' + handle,
+            sha,
+            content: encodedData,
+        }
+    )
+
+    if (updateResponse.status === 200) {
+        // respond with handle if succesul update
+        response = new Response(handle, {
+            ...init,
+            status: 200,
+            statusText: 'Succesful verification',
+        })
+    } else {
+        response = new Response(null, {
+            ...init,
+            status: 400,
+            statusText: 'Error updating list.',
+        })
+    }
+
+    return response
+}
+
 /**
  * @param {*} request
  * Accpets handle=<tweet handle>
@@ -43,61 +189,7 @@ export async function handleVerify(request) {
         const handle = searchParams.get('handle')
         const addr = searchParams.get('addr')
 
-        // get tweet data from twitter api
-        const twitterURL = `https://api.twitter.com/2/tweets/search/recent?query=from:${handle}`
-        requestOptions.headers.set('Origin', new URL(twitterURL).origin) // format for cors
-        const twitterRes = await fetch(twitterURL, requestOptions)
-        // parse the response from Twitter
-        const twitterResponse = await gatherResponse(twitterRes)
-
-        // if no tweet or author found, return error
-        if (!twitterResponse.data) {
-            return new Response('invalid handle', {
-                ...init,
-                status: 400,
-                statusText: 'Invalid handle',
-            })
-        }
-
-        // get tweet text and handle
-        const tweets = twitterResponse.data
-
-        // // parse sig from tweet
-        const matched = tweets.find(tweet => {
-            return !!tweet.text.match(sigReg)
-        })
-
-        if (!matched) {
-            return new Response(null, {
-                ...init,
-                status: 400,
-                statusText: 'Can not find the tweet',
-            })
-        }
-
-        const tweetID = matched.id
-        const matchedText = matched.text
-
-        // parse sig from tweet
-        const sig = matchedText.match(sigReg)[0].slice(0, 132)
-
-        const msgParams = {
-            domain: {
-                name: 'CyberConnect Verifier',
-                version: '1',
-            },
-            message: {
-                contents: "I'm verifying my Twitter account on CyberConnect",
-            },
-            primaryType: 'Permit',
-            types: {
-                EIP712Domain: [
-                    { name: 'name', type: 'string' },
-                    { name: 'version', type: 'string' },
-                ],
-                Permit: [{ name: 'contents', type: 'string' }],
-            },
-        }
+        const { tweetID, sig } = getTweetInfo(handle)
 
         const recoveredAddr = recoverTypedSignatureV4({
             data: msgParams,
@@ -113,95 +205,56 @@ export async function handleVerify(request) {
             })
         }
 
-        // initialize response
-        let response
-
-        const octokit = new Octokit({
-            auth: GITHUB_AUTHENTICATION,
+        const response = await writeVerify({
+            fileName: 'verified.json',
+            tweetID,
+            handle,
+            addr: recoveredAddr,
         })
-
-        const fileName = 'verified.json'
-        const githubPath = '/repos/cyberconnecthq/connect-list/contents/'
-
-        const repoInfo = await fetch('https://api.github.com' + githubPath, {
-            headers: {
-                Authorization: 'token ' + GITHUB_AUTHENTICATION,
-                'User-Agent': USER_AGENT,
-                'cache-control': 'no-store',
-            },
-        })
-
-        const repoJSON = await repoInfo.json()
-
-        const verifyFile = repoJSON.find(file => {
-            return file.name === fileName
-        })
-
-        const sha = verifyFile.sha
-
-        const fileInfo = await octokit.request(
-            'GET /repos/{owner}/{repo}/git/blobs/{file_sha}',
-            {
-                owner: 'cyberconnecthq',
-                repo: 'connect-list',
-                file_sha: sha,
-            }
-        )
-
-        const fileJSON = fileInfo.data
-
-        // // Decode the String as json object
-        var decodedList = JSON.parse(atob(fileJSON.content))
-
-        if (!!decodedList[recoveredAddr]) {
-            return new Response(null, {
-                ...init,
-                status: 400,
-                statusText: 'Error already verified.',
-            })
-        }
-
-        decodedList[recoveredAddr] = {
-            twitter: {
-                timestamp: Date.now(),
-                tweetID,
-                handle,
-            },
-        }
-
-        const stringData = JSON.stringify(decodedList)
-
-        const encodedData = btoa(stringData)
-
-        const updateResponse = await octokit.request(
-            'PUT ' + githubPath + fileName,
-            {
-                owner: 'cyberconnecthq',
-                repo: 'connect-list',
-                path: fileName,
-                message: 'Linking ' + recoveredAddr + ' to handle: ' + handle,
-                sha,
-                content: encodedData,
-            }
-        )
-
-        if (updateResponse.status === 200) {
-            // respond with handle if succesul update
-            response = new Response(handle, {
-                ...init,
-                status: 200,
-                statusText: 'Succesful verification',
-            })
-        } else {
-            response = new Response(null, {
-                ...init,
-                status: 400,
-                statusText: 'Error updating list.',
-            })
-        }
 
         return response
     } catch (e) {
+        return new Response(null, {
+            ...init,
+            status: 400,
+            statusText: 'Error:' + e,
+        })
+    }
+}
+
+export async function handleVerifySolana(request) {
+    try {
+        // get tweet handle and addr from url
+        const { searchParams } = new URL(request.url)
+
+        const handle = searchParams.get('handle')
+        const addr = searchParams.get('addr')
+
+        const { tweetID, sig } = await getTweetInfo(handle)
+
+        const message = new TextEncoder().encode(JSON.stringify(msgParams))
+
+        // if signer found is not the expected signer, alert client and dont update gist
+        if (
+            !sign.detached.verify(message, bs58.decode(sig), bs58.decode(addr))
+        ) {
+            return new Response(null, {
+                ...init,
+                status: 400,
+                statusText: 'Signature verify failed',
+            })
+        }
+
+        const response = await writeVerify({
+            fileName: 'verified-solana.json',
+            tweetID,
+            handle,
+            addr,
+        })
+
+        return response
+    } catch (e) {
+        console.log(e)
         return new Response(null, {
             ...init,
             status: 400,

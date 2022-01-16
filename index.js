@@ -1,5 +1,5 @@
 import Router from './router'
-import { handleVerify } from './handlers/verify'
+import { handleVerify, handleVerifySolana } from './handlers/verify'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -37,6 +37,7 @@ function handleOptions(request) {
 async function handleRequest(request) {
     const r = new Router()
     r.get(`.*/twitter-verify`, request => handleVerify(request))
+    r.get('.*/twitter-verify-solana', request => handleVerifySolana(request))
     r.get(
         '/',
         () =>
