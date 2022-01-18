@@ -195,7 +195,7 @@ export async function handleVerify(request) {
         const handle = searchParams.get('handle')
         const addr = searchParams.get('addr')
 
-        const { tweetID, sig } = getTweetInfo(handle)
+        const { tweetID, sig } = await getTweetInfo(handle)
 
         const recoveredAddr = recoverTypedSignatureV4({
             data: msgParams,
