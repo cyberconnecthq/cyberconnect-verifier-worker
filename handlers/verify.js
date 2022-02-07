@@ -121,7 +121,7 @@ const writeVerify = async ({ fileName, addr, handle, tweetID }) => {
     // // Decode the String as json object
     var decodedList = JSON.parse(atob(fileJSON.content))
 
-    if (!!decodedList[addr]) {
+    if (!!decodedList[addr] && decodedList[addr].twitter.handle === handle) {
         return new Response(
             JSON.stringify({ errorText: 'Address already verified.' }),
             {
