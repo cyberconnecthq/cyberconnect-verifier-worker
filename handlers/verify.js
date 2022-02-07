@@ -34,7 +34,7 @@ const msgParams = {
         version: '1',
     },
     message: {
-        contents: "I'm verifying my Twitter account on CyberConnect",
+        contents: "I'm verifying my Twitter account.",
     },
     primaryType: 'Permit',
     types: {
