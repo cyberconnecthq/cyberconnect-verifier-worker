@@ -192,7 +192,7 @@ export async function handleVerify(request) {
         // get tweet handle and addr from url
         const { searchParams } = new URL(request.url)
 
-        const handle = searchParams.get('handle')
+        const handle = searchParams.get('handle').trim()
         const addr = searchParams.get('addr')
 
         const { tweetID, sig } = await getTweetInfo(handle)
@@ -236,7 +236,7 @@ export async function handleVerifySolana(request) {
         // get tweet handle and addr from url
         const { searchParams } = new URL(request.url)
 
-        const handle = searchParams.get('handle')
+        const handle = searchParams.get('handle').trim()
         const addr = searchParams.get('addr')
 
         const { tweetID, sig } = await getTweetInfo(handle)
