@@ -1,5 +1,6 @@
 import Router from './router'
-import { handleVerify, handleVerifySolana } from './handlers/twitter-verify'
+import { handleVerify } from './handlers/twitter-verify'
+import { handleVerify as handleTwitter } from './handlers/twitter-verify-v2'
 import { handleGithubVerify } from './handlers/gitbub-verify'
 
 const corsHeaders = {
@@ -37,9 +38,9 @@ function handleOptions(request) {
 
 async function handleRequest(request) {
     const r = new Router()
-    r.get(`.*/twitter-verify`, request => handleVerify(request))
-    r.get('.*/twitter-verify-solana', request => handleVerifySolana(request))
-    r.get('.*/github-verify', request => handleGithubVerify(request))
+    r.get('.*/api/v2/twitter-verify', request => handleTwitter(request))
+    r.get(`.*api/twitter-verify`, request => handleVerify(request))
+    r.get('.*api/github-verify', request => handleGithubVerify(request))
     r.get(
         '/',
         () =>
